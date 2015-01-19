@@ -8,32 +8,34 @@ License: MIT
     "use strict";
 
     //# Setup the $services required by the evalers
-    var $services = {
-        is: {
-            fn: function (f) {
-                return (Object.prototype.toString.call(f) === '[object Function]');
+    var evaler = "evaler",
+        $services = {
+            is: {
+                fn: function (f) {
+                    return (Object.prototype.toString.call(f) === '[object Function]');
+                },
+                obj: function (o) {
+                    return (o && o === Object(o) && !$services.is.fn(o));
+                },
+                arr: function (a) {
+                    return (Object.prototype.toString.call(a) === '[object Array]');
+                }
             },
-            obj: function (o) {
-                return (o && o === Object(o) && !$services.is.fn(o));
-            },
-            arr: function (a) {
-                return (Object.prototype.toString.call(a) === '[object Array]');
-            }
-        },
-        newID: function (sPrefix) {
-            var sRandom;
-            sPrefix = sPrefix || cjsss;
+            newID: function (sPrefix) {
+                var sRandom;
+                sPrefix = sPrefix || evaler;
 
-            //# Do...while the sPrefix + sRandom exists as an ID in the document, try to find a unique ID returning the first we find
-            do {
-                sRandom = Math.floor(Math.random() * 1000);
-            } while (document.getElementById(sPrefix + sRandom));
-            return sPrefix + sRandom;
+                //# Do...while the sPrefix + sRandom exists as an ID in the document, try to find a unique ID returning the first we find
+                do {
+                    sRandom = Math.floor(Math.random() * 1000);
+                } while (document.getElementById(sPrefix + sRandom));
+                return sPrefix + sRandom;
+            }
         }
-    };
+    ;
 
     //# Run the fnEvalerFactory, setting its result into window.evaler
-    $win.evaler = fnEvalerFactory($win, $doc, $services, fnLocalEvaler, fnUseStrictEvaler, fnSandboxEvalerFactory);
+    $win[evaler] = fnEvalerFactory($win, $doc, $services, fnLocalEvaler, fnUseStrictEvaler, fnSandboxEvalerFactory);
 })(
     window,
     document,
@@ -362,49 +364,3 @@ License: MIT
         }; //# create
     }
 );
-
-
-/*
-http://blog.stackoverflow.com/2014/09/introducing-runnable-javascript-css-and-html-code-snippets/
-
-
- http://www.html5rocks.com/en/tutorials/security/sandboxed-iframes/
-
- http://stackoverflow.com/questions/4536237/putting-javascript-into-css/27751891#27751891
- http://stackoverflow.com/questions/476276/using-javascript-in-css/27751954#27751954
- http://stackoverflow.com/questions/7247202/how-to-use-variable-in-css?lq=1
- http://stackoverflow.com/questions/47487/create-a-variable-in-css-file-for-use-within-that-css-file
-
-
-//# SCRIPT tag versus eval - http://stackoverflow.com/questions/8380204/is-there-a-performance-gain-in-including-script-tags-as-opposed-to-using-eval
-//# 
-//# http://www.nczonline.net/blog/2009/07/28/the-best-way-to-load-external-javascript/
-//# http://stackoverflow.com/questions/8946715/lazy-loading-javascript-and-inline-javascript
-//# http://www.html5rocks.com/en/tutorials/speed/script-loading/
-//# https://github.com/jquery/jquery/blob/1.3.2/src/ajax.js#L264 but no longer in https://github.com/jquery/jquery/blob/1.x-master/src/ajax.js
-function loadScript(sUrl, fnCallback) {
-    var $script = document.createElement("script"),
-        bLoaded = false
-    ;
-
-    //# Setup the $script tag
-    $script.type = "text/javascript";
-    $script.onload = $script.onreadystatechange = function () { 
-        //# In order to support IE10- and Opera, test .readyState (which will be `undefined` in other environments), see: http://msdn.microsoft.com/en-au/library/ie/ms534359%28v=vs.85%29.aspx
-        switch ($script.readyState || null) {
-            case null:
-            case "loaded":
-            case "complete": {
-                delete $script.onreadystatechange;
-                if (!bLoaded) { fnCallback(); }
-                bLoaded = true
-            }
-        }
-    };
-    $script.src = sUrl;
-
-    //# 
-    document.getElementsByTagName("head")[0].appendChild(script);
-    //? document.documentElement.insertBefore(script, document.documentElement.firstChild);
-}
-*/
