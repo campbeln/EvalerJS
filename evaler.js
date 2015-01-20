@@ -1,5 +1,5 @@
 /*
-evaler.js v0.5e http://opensourcetaekwondo.com/evaler/
+EvalerJS v0.5f http://opensourcetaekwondo.com/evaler/
 (c) 2014-2015 Nick Campbell cjsssdev@gmail.com
 License: MIT
 */
@@ -44,7 +44,7 @@ License: MIT
         "use strict";
 
         var fnJSONParse,
-            sVersion = "v0.5e",
+            sVersion = "v0.5f",
             fnGlobalEvaler = null
         ;
 
@@ -82,6 +82,7 @@ License: MIT
             return function (vJS, oInject, bReturnObject) {
                 var i,
                     bAsArray = $services.is.arr(vJS),
+                    bInjections = $services.is.obj(oInject),
                     oReturnVal = {
                         js: (bAsArray ? vJS : [vJS]),
                         results: [],
@@ -90,23 +91,38 @@ License: MIT
                 ;
 
                 //# If we have a oContext and the passed oInject .is.obj
-                if (oContext && $services.is.obj(oInject)) {
+                if (oContext && bInjections) {
                     //# Traverse oInject, setting each .hasOwnProperty into the oContext (leaving oContext's current definition if there is one)
                     for (i in oInject) {
-                        if (oInject.hasOwnProperty(i)) {
-                            oContext[i] = oContext[i] || oInject[i];
+                        if (oContext[i] === undefined && oInject.hasOwnProperty(i)) {
+                            oContext[i] = oInject[i];
                         }
                     }
                 }
 
-                //# Traverse the .js, .pushing each fnEval .results into our oReturnVal (optionally .call'ing bInContext if necessary as we go)
-                for (i = 0; i < oReturnVal.js.length; i++) {
-                    try {
-                        oReturnVal.results.push(bInContext ? fnEval.call(oContext, oReturnVal.js[i]) : fnEval(oReturnVal.js[i]));
-                    } catch (e) {
-                        //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
-                        oReturnVal.results.push(undefined);
-                        oReturnVal.errors.push({ index: i, error: e, js: oReturnVal.js[i] });
+                //# Determine the type of fnEval and process accordingly
+                switch (fnEval) {
+                    case fnLocalEvaler:
+                    case fnUseStrictEvaler: {
+                        //# As this is either a fnLocalEvaler or fnUseStrictEvaler, we need to let them traverse the .js and non-oContext oInject'ions, so call them accordingly
+                        //#     NOTE: oReturnVal is updated byref, so there is no need to collect a return value
+                        fnEval(oReturnVal, i, {
+                            inject: (!bInContext && bInjections ? oInject : {}),
+                            context: (bInContext ? oContext : undefined)
+                        });
+                        break;
+                    }
+                    default: {
+                        //# Traverse the .js, .pushing each fnEval .results into our oReturnVal (optionally .call'ing bInContext if necessary as we go)
+                        for (i = 0; i < oReturnVal.js.length; i++) {
+                            try {
+                                oReturnVal.results.push(bInContext ? fnEval.call(oContext, oReturnVal.js[i]) : fnEval(oReturnVal.js[i]));
+                            } catch (e) {
+                                //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
+                                oReturnVal.results.push(undefined);
+                                oReturnVal.errors.push({ index: i, error: e, js: oReturnVal.js[i] });
+                            }
+                        }
                     }
                 }
 
@@ -231,12 +247,12 @@ License: MIT
             global: function (bFallback, $window) {
                 return evalerFactory("g", $window || _window, { f: bFallback });
             },
-            local: function (oContext) {
+            local: (!fnLocalEvaler ? undefined : function (oContext) {
                 return evalerFactory("l", oContext /*, {}*/);
-            },
-            useStrict: function (oContext) {
+            }),
+            useStrict: (!fnUseStrictEvaler ? undefined : function (oContext) {
                 return evalerFactory("u", oContext /*, {}*/);
-            },
+            }),
             isolated: function (oContext, oReturnedByRef) {
                 return evalerFactory("i", oContext, oReturnedByRef);
             },
@@ -250,13 +266,75 @@ License: MIT
         };
     },
     //# fnLocalEvaler function. Placed here to limit its scope and local variables as narrowly as possible (hence the use of arguments[0])
-    function (/* sJS */) {
-        return eval(arguments[0]);
+    function (/* oData, i, oMetaData */) {
+        //# Traverse the .inject'ions, setting each as a local var as we go
+        for (arguments[1] in arguments[2].inject) {
+            if (arguments[2].inject.hasOwnProperty(arguments[1])) {
+                eval("var " + arguments[1] + "=arguments[2].inject[arguments[1]];");
+            }
+        }
+
+        //# Setup the local .evaler under the passed oMetaData (aka arguments[2])
+        arguments[2].evaler = function(/* sJS */) {
+            return eval(arguments[0]);
+        };
+
+        //# Traverse the .js, processing each entry as we go
+        for (arguments[1] = 0; arguments[1] < arguments[0].js.length; arguments[1]++) {
+            try {
+                arguments[0].results.push(arguments[2].context
+                    ? arguments[2].evaler.call(arguments[2].context, arguments[0].js[arguments[1]])
+                    : eval(arguments[0].js[arguments[1]])
+                );
+            } catch (e) {
+                //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
+                arguments[0].results.push(undefined);
+                arguments[0].errors.push({ index: arguments[1], error: e, js: arguments[0].js[arguments[1]] });
+            }
+        }
+
+        //# Return the modified arguments[0] to the caller
+        //#     NOTE: As this is modified byref there is no need to actually return arguments[0]
+        //return arguments[0];
     },
     //# fnUseStrictEvaler function. Placed here to limit its scope and local variables as narrowly as possible (hence the use of arguments[0])
-    function (/* sJS */) {
-        "use strict";
-        return eval(arguments[0]);
+    //#     NOTE: Since we cannot conditionally invoke strict mode (see: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode#Invoking_strict_mode) we need 2 implementations for fnLocalEvaler and fnUseStrictEvaler
+    function (/* oData, i, oMetaData */) {
+        //# Traverse the .inject'ions, setting each as a local var as we go
+        //#     NOTE: We do this outside of the "use strict" function below so we don't need to pollute the global context while still having persistent var's across eval'uations (which "use strict" doesn't allow)
+        for (arguments[1] in arguments[2].inject) {
+            if (arguments[2].inject.hasOwnProperty(arguments[1])) {
+                eval("var " + arguments[1] + "=arguments[2].inject[arguments[1]];");
+            }
+        }
+
+        //# Setup the internal function with "use strict" in place
+        (function () {
+            "use strict";
+
+            //# Setup the local .evaler under the passed oMetaData (aka arguments[2])
+            arguments[2].evaler = function (/* sJS */) {
+                return eval(arguments[0]);
+            };
+
+            //# Traverse the .js, processing each entry as we go
+            for (arguments[1] = 0; arguments[1] < arguments[0].js.length; arguments[1]++) {
+                try {
+                    arguments[0].results.push(arguments[2].context
+                        ? arguments[2].evaler.call(arguments[2].context, arguments[0].js[arguments[1]])
+                        : eval(arguments[0].js[arguments[1]])
+                    );
+                } catch (e) {
+                    //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
+                    arguments[0].results.push(undefined);
+                    arguments[0].errors.push({ index: arguments[1], error: e, js: arguments[0].js[arguments[1]] });
+                }
+            }
+        })(arguments[0], 0, arguments[2]);
+        
+        //# Return the modified arguments[0] to the caller
+        //#     NOTE: As this is modified byref there is no need to actually return arguments[0]
+        //return arguments[0];
     },
     //# fnSandboxEvalerFactory function.
     function (_window, $services, $factories) {
