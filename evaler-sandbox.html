@@ -1,0 +1,87 @@
+<html>
+    <head>
+        <script>
+            /*
+             EvalerJS v0.5e (kk) http://opensourcetaekwondo.com/cjsss/
+             (c) 2014-2015 Nick Campbell cjsssdev@gmail.com
+             License: MIT
+             */
+            //# Ensure the .addEventListener interface is setup/polyfilled then .addEventListener under our window so we can recieve the .postMessage's
+            //#     SEE: https://developer.mozilla.org/en-US/docs/Web/API/Window.postMessage , http://www.html5rocks.com/en/tutorials/security/sandboxed-iframes/ , http://stackoverflow.com/questions/3457391/how-do-you-use-window-postmessage-across-domains
+            window.addEventListener = window.addEventListener || function(e, f) { window.attachEvent('on' + e, f); };
+            window.addEventListener('message', function(oMessage){
+                var i,
+                    oData = oMessage.data,
+                    bReturnString = (typeof oData === 'string' || oData instanceof String),
+                    a_sResults = [],
+                    a_oErrors = [],
+                    a_sTemp = oData.inject
+                ;
+
+                //# 
+                if (bReturnString) {
+                    oData = JSON.parse(oData);
+                }
+
+                //# Traverse the .inject'ions, adding in those that do no already exist under the window
+                for (i in a_sTemp){
+                    if (a_sTemp.hasOwnProperty(i)){
+                        window[i] = window[i] || a_sTemp[i];
+                    }
+                }
+
+                //# Reuse a_sTemp to store .js
+                a_sTemp = oData.js;
+
+                //# Traverse the .data.js, eval'ing each as we go while returning the result back into the related index (and ignoring any errors)
+                for (i = 0; i < a_sTemp.length; i++) {
+                    try {
+                        a_sResults.push(window.$sandbox[oData.type](a_sTemp[i], oData.context));
+                    }
+                    catch (e) {
+                        a_sResults.push(undefined);
+                        a_oErrors.push({
+                            index: i,
+                            error: e
+                        });
+                    }
+                }
+
+                //# Reset oData to the info to ship back to our caller
+                oData = {
+                    r: a_sResults,
+                    e: a_oErrors,
+                    js: oData.js,
+                    id: oData.id,
+                    arg: oData.arg
+                };
+
+                //# .postMessage back to our .source with the r(esults), id and arg(ument)
+                oMessage.source.postMessage(
+                    (bReturnString ? window.JSON.stringify(oData) : oData),
+                    oMessage.origin
+                );
+            });
+
+            //# Setup the 3 eval'uation interfaces (the .global, the .local and the .context'ual) then reset our .parent to null
+            window.$sandbox={
+                global: function() {
+                    try{
+                        return (function(globalObject, Object) {
+                            return((1,eval)('Object') === globalObject
+                                ? function() { return(1,eval)(arguments[0]); }
+                                : (window.execScript ? function() { return window.execScript(arguments[0]); } : undefined)
+                            );
+                        })(Object, {});
+                    } catch(e) { return undefined; }
+                }(),
+                local:function(){return eval(arguments[0]);},
+                //context:function(){return function(){return eval(arguments[1]);}.call(arguments[0]);},
+                context:function(){window.$sandbox.local.call(arguments[1], arguments[0]);},
+                isolated:window.$sandbox.global||window.$sandbox.local
+            };
+            parent = null;
+        </script>
+    </head>
+    <body></body>
+</html>
