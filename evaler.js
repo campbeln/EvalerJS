@@ -1,15 +1,19 @@
 /*
-EvalerJS v0.5f http://opensourcetaekwondo.com/evaler/
+EvalerJS v0.5g http://opensourcetaekwondo.com/evaler/
 (c) 2014-2015 Nick Campbell cjsssdev@gmail.com
 License: MIT
 */
-//# SCRIPT tag versus eval - http://stackoverflow.com/questions/8380204/is-there-a-performance-gain-in-including-script-tags-as-opposed-to-using-eval , http://jsperf.com/dynamic-script-tag-with-src-vs-xhr-eval-vs-xhr-inline-s/4
+
+//# Orchestration function used to DI/ease maintenance across CjsSS.js, ngCss and EvalerJS
 (function (_window, _document, fnEvalerFactory, fnLocalEvaler, fnUseStrictEvaler, fnSandboxEvalerFactory) {
     "use strict";
 
     //# Setup the $services required by the evalers
-    var _Object_prototype_toString = Object.prototype.toString,
+    var _Object_prototype_toString = Object.prototype.toString, //# code-golf
         $services = {
+            version: "v0.5g",
+
+            //# Datatype checking functionality
             is: {
                 fn: function (f) {
                     return (_Object_prototype_toString.call(f) === '[object Function]');
@@ -21,6 +25,9 @@ License: MIT
                     return (_Object_prototype_toString.call(a) === '[object Array]');
                 }
             },
+
+            //# Returns an unused sPrefix'ed HTML ID
+            //#     NOTE: sPrefix must begin with /A-Za-z/
             newId: function (sPrefix) {
                 var sRandom = "";
                 //sPrefix = sPrefix || evaler
@@ -34,7 +41,7 @@ License: MIT
         }
     ;
 
-    //# Run the fnEvalerFactory, setting its result into window.evaler
+    //# Now that we have everything orchestrated, run the fnEvalerFactory, setting its result into window.evaler
     _window.evaler = fnEvalerFactory(_window, _document, $services, fnLocalEvaler, fnUseStrictEvaler, fnSandboxEvalerFactory);
 })(
     window,
@@ -44,7 +51,6 @@ License: MIT
         "use strict";
 
         var fnJSONParse,
-            sVersion = "v0.5f",
             fnGlobalEvaler = null
         ;
 
@@ -77,7 +83,7 @@ License: MIT
 
 
         //# Factory function that configures and returns a looper function for the passed fnEval and oContext
-        function looperFactory(fnEval, oContext, bInContext) {
+        function looperFactory(fnEval, oContext, bInContext /*, $sandboxWin*/) {
             //# Return the configured .looper function to the caller
             return function (vJS, oInject, bReturnObject) {
                 var i,
@@ -104,12 +110,23 @@ License: MIT
                 switch (fnEval) {
                     case fnLocalEvaler:
                     case fnUseStrictEvaler: {
+                        //# Polyfill Object.keys for use by calls to fnLocalEvaler and fnUseStrictEvaler
+                        //#     NOTE: From http://tokenposts.blogspot.com.au/2012/04/javascript-objectkeys-browser.html via https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/keys
+                        if (!Object.keys) Object.keys = function (o) {
+                            if (o !== Object(o))
+                                throw new TypeError('Object.keys called on a non-object');
+                            var k = [], p;
+                            for (p in o) if (Object.prototype.hasOwnProperty.call(o, p)) k.push(p);
+                            return k;
+                        };
+
                         //# As this is either a fnLocalEvaler or fnUseStrictEvaler, we need to let them traverse the .js and non-oContext oInject'ions, so call them accordingly
                         //#     NOTE: oReturnVal is updated byref, so there is no need to collect a return value
-                        fnEval(oReturnVal, i, {
-                            inject: (!bInContext && bInjections ? oInject : {}),
-                            context: (bInContext ? oContext : undefined)
-                        });
+                        if (bInContext) {
+                            fnEval.call(oContext, oReturnVal, 0, (!bInContext && bInjections ? { o: oInject, k: Object.keys(oInject) } : null));
+                        } else {
+                            fnEval(oReturnVal, 0, (!bInContext && bInjections ? { o: oInject, k: Object.keys(oInject) } : null));
+                        }
                         break;
                     }
                     default: {
@@ -137,9 +154,9 @@ License: MIT
             var sID = $services.newId("sandbox");
 
             //# As long as the caller didn't request an IFRAME without a sandbox attribute, reset sSandboxAttr to an attribute definition
-            sSandboxAttr = (sSandboxAttr === null
-                ? ''
-                : ' sandbox="' + (sSandboxAttr ? sSandboxAttr : "allow-scripts") + '"'
+            sSandboxAttr = (sSandboxAttr === null ?
+                '' :
+                ' sandbox="' + (sSandboxAttr ? sSandboxAttr : "allow-scripts") + '"'
             );
 
             //# .insertAdjacentHTML IFRAME at the beginning of the .body (or .head)
@@ -157,6 +174,7 @@ License: MIT
         //# Factory function that returns a looper function for the requested evaluation eMode, oContext and oConfig
         function evalerFactory(eMode, oContext, oConfig) {
             var fnEvaler,
+                sEval = "eval",
                 bContextPassed = (oContext !== undefined && oContext !== null)
             ;
 
@@ -178,11 +196,12 @@ License: MIT
                             return looperFactory(fnEvaler, _window/*, false*/);
                         }
                     }
-                        //# Else if the passed oContext has an .eval function
-                    else if ($services.is.fn(oContext.eval)) {
+                    //# Else if the passed oContext has an .eval function
+                    //#     NOTE: We Do some backflips with sEval below because strict mode complains about using .eval as it's a pseudo-reserved word, see: https://mathiasbynens.be/notes/reserved-keywords
+                    else if ($services.is.fn(oContext[sEval])) {
                         //# Attempt to collect the foreign fnGlobalEvaler, then safely set it (or optionally the foreign fnLocalEvaler if we are to .f(allback)) into fnEvaler
-                        fnEvaler = oContext.eval("(function(){" + getGlobalEvaler(true) + "})()");
-                        fnEvaler = (!fnEvaler && oConfig.f ? function (/* sJS */) { return oContext.eval(arguments[0]); } : fnEvaler);
+                        fnEvaler = oContext[sEval]("(function(){" + getGlobalEvaler(true) + "})()");
+                        fnEvaler = (!fnEvaler && oConfig.f ? function (/* sJS */) { return oContext[sEval](arguments[0]); } : fnEvaler);
 
                         //# If we were able to collect an fnEvaler above, return the configured looper (or the fnEvaler if this is a .r(ecursiveCall))
                         if (fnEvaler) {
@@ -236,14 +255,15 @@ License: MIT
         if (_window.JSON && _window.JSON.parse) {
             fnJSONParse = _window.JSON.parse;
         }
-            //# Else if $jQuery's .parseJSON is available, set fnJSONParse to it
+        //# Else if $jQuery's .parseJSON is available, set fnJSONParse to it
         else if (_window.jQuery && _window.jQuery.parseJSON) {
             fnJSONParse = _window.jQuery.parseJSON;
         }
 
+
         //# Configure and return our return value
         return {
-            version: sVersion,
+            version: $services.version,
             global: function (bFallback, $window) {
                 return evalerFactory("g", $window || _window, { f: bFallback });
             },
@@ -259,38 +279,36 @@ License: MIT
             json: (!fnJSONParse ? undefined : function () {
                 return evalerFactory("j" /*, undefined, {}*/);
             }),
-            sandbox: (!fnSandboxEvalerFactory
-                ? undefined
-                : fnSandboxEvalerFactory(_window, $services, { looper: looperFactory, iframe: iframeFactory })
+            sandbox: (!fnSandboxEvalerFactory ?
+                undefined :
+                fnSandboxEvalerFactory(_window, $services, { looper: looperFactory, iframe: iframeFactory })
             )
         };
     },
     //# fnLocalEvaler function. Placed here to limit its scope and local variables as narrowly as possible (hence the use of arguments[0])
-    function (/* oData, i, oMetaData */) {
-        //# Traverse the .inject'ions, setting each as a local var as we go
-        for (arguments[1] in arguments[2].inject) {
-            if (arguments[2].inject.hasOwnProperty(arguments[1])) {
-                eval("var " + arguments[1] + "=arguments[2].inject[arguments[1]];");
+    function (/* oData, i, oInjectData */) {
+        //# If oInjectData was passed, traverse the injection .o(bject) .shift'ing off a .k(ey) at a time as we set each as a local var
+        if (arguments[2]) {
+            while (arguments[2].k.length > 0) {
+                eval("var " + arguments[2].k.shift() + "=arguments[2].o[arguments[1]];");
             }
         }
 
-        //# Setup the local .evaler under the passed oMetaData (aka arguments[2])
-        arguments[2].evaler = function(/* sJS */) {
-            return eval(arguments[0]);
-        };
+        //# Ensure the passed i (aka arguments[1]) is 0
+        //#     NOTE: i (aka arguments[1]) must be passed in as 0 ("bad assignment")
+        //arguments[1] = 0;
 
         //# Traverse the .js, processing each entry as we go
-        for (arguments[1] = 0; arguments[1] < arguments[0].js.length; arguments[1]++) {
+        //#     NOTE: We use a getto-version of a for loop below to keep JSHint happy and to limit the exposed local variables to `arguments` only
+        while (arguments[1] < arguments[0].js.length) {
             try {
-                arguments[0].results.push(arguments[2].context
-                    ? arguments[2].evaler.call(arguments[2].context, arguments[0].js[arguments[1]])
-                    : eval(arguments[0].js[arguments[1]])
-                );
+                eval(arguments[0].js[arguments[1]]);
             } catch (e) {
-                //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
+                //# An error occured fnEval'ing the current index, so .push undefined into this index's entry in .results and log the .errors
                 arguments[0].results.push(undefined);
                 arguments[0].errors.push({ index: arguments[1], error: e, js: arguments[0].js[arguments[1]] });
             }
+            arguments[1]++;
         }
 
         //# Return the modified arguments[0] to the caller
@@ -299,36 +317,34 @@ License: MIT
     },
     //# fnUseStrictEvaler function. Placed here to limit its scope and local variables as narrowly as possible (hence the use of arguments[0])
     //#     NOTE: Since we cannot conditionally invoke strict mode (see: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode#Invoking_strict_mode) we need 2 implementations for fnLocalEvaler and fnUseStrictEvaler
-    function (/* oData, i, oMetaData */) {
-        //# Traverse the .inject'ions, setting each as a local var as we go
+    function (/* oData, i, oInjectData */) {
+        //# If oInjectData was passed, traverse the injection .o(bject) .shift'ing off a .k(ey) at a time as we set each as a local var
         //#     NOTE: We do this outside of the "use strict" function below so we don't need to pollute the global context while still having persistent var's across eval'uations (which "use strict" doesn't allow)
-        for (arguments[1] in arguments[2].inject) {
-            if (arguments[2].inject.hasOwnProperty(arguments[1])) {
-                eval("var " + arguments[1] + "=arguments[2].inject[arguments[1]];");
+        if (arguments[2]) {
+            while (arguments[2].k.length > 0) {
+                eval("var " + arguments[2].k.shift() + "=arguments[2].o[arguments[1]];");
             }
         }
+
+        //# Ensure the passed i (aka arguments[1]) is 0
+        //#     NOTE: i (aka arguments[1]) must be passed in as 0 ("bad assignment")
+        //arguments[1] = 0;
 
         //# Setup the internal function with "use strict" in place
         (function () {
             "use strict";
 
-            //# Setup the local .evaler under the passed oMetaData (aka arguments[2])
-            arguments[2].evaler = function (/* sJS */) {
-                return eval(arguments[0]);
-            };
-
             //# Traverse the .js, processing each entry as we go
-            for (arguments[1] = 0; arguments[1] < arguments[0].js.length; arguments[1]++) {
+            //#     NOTE: We use a getto-version of a for loop below to keep JSHint happy and to limit the exposed local variables to `arguments` only
+            while (arguments[1] < arguments[0].js.length) {
                 try {
-                    arguments[0].results.push(arguments[2].context
-                        ? arguments[2].evaler.call(arguments[2].context, arguments[0].js[arguments[1]])
-                        : eval(arguments[0].js[arguments[1]])
-                    );
+                    eval(arguments[0].js[arguments[1]]);
                 } catch (e) {
-                    //# An error occured fnEval'ing the current i(ndex), so .push undefined into this i(ndex)'s entry in .results and log the .errors
+                    //# An error occured fnEval'ing the current index, so .push undefined into this index's entry in .results and log the .errors
                     arguments[0].results.push(undefined);
                     arguments[0].errors.push({ index: arguments[1], error: e, js: arguments[0].js[arguments[1]] });
                 }
+                arguments[1]++;
             }
         })(arguments[0], 0, arguments[2]);
         
@@ -348,7 +364,11 @@ License: MIT
 
 
         //# Returns a promise interface that uses .postMessage
-        function promise(sType, oContext, bUnused, $sandboxWin) {
+        function promise(sType, oContext /*, bInContext, $sandboxWin*/) {
+            //# Pull the $sandboxWin from the passed arguments
+            //#     NOTE: Since .looperFactory or .promise are called based on the scope, both have to conform to an argument list while both have differing requirements. arguments[2] (aka bInContext) is used by looperFactory while arguments[3] (aka $sandboxWin) is used by promise. Further, in order to avoid unused variables/JSHint complaints, we need to collect $sandboxWin from the arguments
+            var $sandboxWin = arguments[3];
+
             //# If we we have not yet .init'd .postMessage under our own _window, do so now
             //#     NOTE: The looping logic is contained below allowing us to run multiple statements in order and without needing to track that all callbacks have been made
             //#     NOTE: Due to the nature of .$sandbox and the code below, the eval'uated code is exposed to only the "s" variable in the .global and .local functions
@@ -509,6 +529,8 @@ http://blog.stackoverflow.com/2014/09/introducing-runnable-javascript-css-and-ht
  http://stackoverflow.com/questions/476276/using-javascript-in-css/27751954#27751954
  http://stackoverflow.com/questions/7247202/how-to-use-variable-in-css?lq=1
  http://stackoverflow.com/questions/47487/create-a-variable-in-css-file-for-use-within-that-css-file
+
+ //# SCRIPT tag versus eval - http://stackoverflow.com/questions/8380204/is-there-a-performance-gain-in-including-script-tags-as-opposed-to-using-eval , http://jsperf.com/dynamic-script-tag-with-src-vs-xhr-eval-vs-xhr-inline-s/4
 
 
 //# SCRIPT tag versus eval - http://stackoverflow.com/questions/8380204/is-there-a-performance-gain-in-including-script-tags-as-opposed-to-using-eval
